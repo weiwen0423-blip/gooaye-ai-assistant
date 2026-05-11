@@ -10,14 +10,35 @@ from email.mime.application import MIMEApplication
 
 def get_latest_gooaye_episode():
     rss_url = "https://open.firstory.me/rss/user/ckinqg0o0f9y30855nzzg4c3v" 
-    feed = feedparser.parse(rss_url)
-    if not feed.entries:
+    print("🔍 開始偽裝成人類瀏覽器抓取 RSS...")
+    
+    # 加入 User-Agent 偽裝面具，避免被伺服器阻擋
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    
+    try:
+        response = requests.get(rss_url, headers=headers)
+        feed = feedparser.parse(response.content)
+    except Exception as e:
+        print(f"❌ 讀取 RSS 失敗：{e}")
         return None, None
+    
+    if not feed.entries:
+        print("❌ 抓取失敗，找不到任何集數（可能還是被擋了）！")
+        return None, None
+        
     latest = feed.entries[0]
     title = latest.title
+    print(f"✅ 成功突破！找到最新集數：{title}")
+    
     for link in latest.links:
-        if link.type == 'audio/mpeg':
+        # 放寬條件：只要格式裡有 audio 就抓下來
+        if 'audio' in link.type:
+            print(f"🔗 成功擷取音檔連結！")
             return link.href, title
+            
+    print("❌ 找不到這集的音檔連結。")
     return None, title
 
 def download_and_transcribe(mp3_url):
@@ -29,12 +50,11 @@ def download_and_transcribe(mp3_url):
             if chunk:
                 f.write(chunk)
     
-    print("🧠 開始 Whisper 轉譯 (約 15-30 分鐘)...")
+    print("🧠 開始 Whisper 轉譯 (約 15-30 分鐘，請耐心等待)...")
     model = whisper.load_model("base")
     result = model.transcribe(audio_file)
     os.remove(audio_file)
     
-    # 將逐字稿存成 txt 檔案
     transcript_text = result["text"]
     with open("transcript.txt", "w", encoding="utf-8") as f:
         f.write(transcript_text)
@@ -70,10 +90,8 @@ def send_email(subject, content, transcript_file_path):
     msg['To'] = gmail_user
     msg['Subject'] = f"【股癌 AI 助理】{subject} - 分析報告與逐字稿"
     
-    # 郵件正文 (AI 分析結果)
     msg.attach(MIMEText(content, 'plain', 'utf-8'))
     
-    # 添加附件 (完整逐字稿)
     if os.path.exists(transcript_file_path):
         with open(transcript_file_path, "rb") as f:
             part = MIMEApplication(f.read(), Name=os.path.basename(transcript_file_path))
@@ -92,8 +110,6 @@ def send_email(subject, content, transcript_file_path):
 if __name__ == "__main__":
     mp3_link, episode_title = get_latest_gooaye_episode()
     if mp3_link:
-        print(f"📌 處理集數：{episode_title}")
         transcript = download_and_transcribe(mp3_link)
         analysis_result = analyze_with_gemini(transcript, episode_title)
-        # 傳入生成的逐字稿路徑
         send_email(episode_title, analysis_result, "transcript.txt")
