@@ -1,0 +1,26 @@
+name: 股癌 Podcast 自動抓取
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-scraper:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 把程式碼抓到虛擬機器
+      uses: actions/checkout@v3
+
+    - name: 安裝 Python 環境
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: 安裝 FFmpeg (Whisper 必備工具)
+      run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+    - name: 安裝必備套件
+      run: pip install -r requirements.txt
+
+    - name: 執行 Python 腳本
+      run: python main.py
