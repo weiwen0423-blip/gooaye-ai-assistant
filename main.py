@@ -1,4 +1,3 @@
-import feedparser
 import requests
 import whisper
 import os
@@ -9,48 +8,56 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 
 def get_latest_gooaye_episode():
-    rss_url = "https://open.firstory.me/rss/user/ckinqg0o0f9y30855nzzg4c3v" 
-    print("🔍 開始偽裝成人類瀏覽器抓取 RSS...")
-    
-    # 加入 User-Agent 偽裝面具，避免被伺服器阻擋
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
+    # 🌟 秘訣：使用 rss2json 代理服務來繞過 Firstory 的機房阻擋
+    api_url = "https://api.rss2json.com/v1/api.json?rss_url=https://open.firstory.me/rss/user/ckinqg0o0f9y30855nzzg4c3v" 
+    print("🔍 透過代理服務檢查最新集數...")
     
     try:
-        response = requests.get(rss_url, headers=headers)
-        feed = feedparser.parse(response.content)
+        response = requests.get(api_url)
+        data = response.json()
     except Exception as e:
-        print(f"❌ 讀取 RSS 失敗：{e}")
+        print(f"❌ 讀取 API 失敗：{e}")
         return None, None
     
-    if not feed.entries:
-        print("❌ 抓取失敗，找不到任何集數（可能還是被擋了）！")
+    if data.get('status') != 'ok' or not data.get('items'):
+        print("❌ 抓取失敗，找不到集數（代理伺服器可能出錯）！")
         return None, None
         
-    latest = feed.entries[0]
-    title = latest.title
-    print(f"✅ 成功突破！找到最新集數：{title}")
+    latest = data['items'][0]
+    title = latest.get('title')
     
-    for link in latest.links:
-        # 放寬條件：只要格式裡有 audio 就抓下來
-        if 'audio' in link.type:
-            print(f"🔗 成功擷取音檔連結！")
-            return link.href, title
+    # --- 記憶功能：檢查是否已經處理過 ---
+    memory_file = "last_episode.txt"
+    last_title = ""
+    if os.path.exists(memory_file):
+        with open(memory_file, "r", encoding="utf-8") as f:
+            last_title = f.read().strip()
             
-    print("❌ 找不到這集的音檔連結。")
+    if title == last_title:
+        print(f"💤 最新集數【{title}】已經處理過了，繼續休眠。")
+        return None, None
+        
+    print(f"✨ 發現新集數！準備處理：{title}")
+    
+    # 從 JSON 資料中直接抽出 mp3 網址
+    mp3_link = latest.get('enclosure', {}).get('link')
+    
+    if mp3_link:
+        return mp3_link, title
+        
+    print("❌ 找不到音檔連結。")
     return None, title
 
 def download_and_transcribe(mp3_url):
     audio_file = "podcast.mp3"
-    print("📥 開始下載音檔...")
+    print("📥 下載音檔中...")
     response = requests.get(mp3_url, stream=True)
     with open(audio_file, "wb") as f:
         for chunk in response.iter_content(chunk_size=1024*1024):
             if chunk:
                 f.write(chunk)
     
-    print("🧠 開始 Whisper 轉譯 (約 15-30 分鐘，請耐心等待)...")
+    print("🧠 Whisper 努力聽寫中 (約需 15-30 分鐘)...")
     model = whisper.load_model("base")
     result = model.transcribe(audio_file)
     os.remove(audio_file)
@@ -62,7 +69,7 @@ def download_and_transcribe(mp3_url):
     return transcript_text
 
 def analyze_with_gemini(transcript, title):
-    print("🤖 呼叫 Gemini 進行產業分析...")
+    print("🤖 Gemini 產業分析中...")
     genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
     model = genai.GenerativeModel('gemini-1.5-flash')
     
@@ -81,14 +88,14 @@ def analyze_with_gemini(transcript, title):
     return response.text
 
 def send_email(subject, content, transcript_file_path):
-    print("📧 準備寄送電子報與逐字稿附件...")
+    print("📧 寄送分析報告與逐字稿...")
     gmail_user = os.environ.get("GMAIL_USER")
     gmail_password = os.environ.get("GMAIL_PASSWORD")
     
     msg = MIMEMultipart()
     msg['From'] = gmail_user
     msg['To'] = gmail_user
-    msg['Subject'] = f"【股癌 AI 助理】{subject} - 分析報告與逐字稿"
+    msg['Subject'] = f"【股癌 AI 助理】{subject}"
     
     msg.attach(MIMEText(content, 'plain', 'utf-8'))
     
@@ -103,13 +110,21 @@ def send_email(subject, content, transcript_file_path):
         server.login(gmail_user, gmail_password)
         server.send_message(msg)
         server.quit()
-        print("✅ 電子報與逐字稿寄送成功！")
+        print("✅ 寄送成功！")
+        return True
     except Exception as e:
         print(f"❌ 寄信失敗：{e}")
+        return False
 
 if __name__ == "__main__":
     mp3_link, episode_title = get_latest_gooaye_episode()
     if mp3_link:
         transcript = download_and_transcribe(mp3_link)
         analysis_result = analyze_with_gemini(transcript, episode_title)
-        send_email(episode_title, analysis_result, "transcript.txt")
+        success = send_email(episode_title, analysis_result, "transcript.txt")
+        
+        # --- 如果成功寄出，就把這集記進小本子裡 ---
+        if success:
+            with open("last_episode.txt", "w", encoding="utf-8") as f:
+                f.write(episode_title)
+            print("💾 已更新記憶本，下次不會重複處理這集。")
