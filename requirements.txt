@@ -1,4 +1,4 @@
 feedparser
-requests
+cloudscraper
 openai-whisper
 google-generativeai
