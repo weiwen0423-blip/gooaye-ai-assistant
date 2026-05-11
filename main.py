@@ -6,17 +6,15 @@ import google.generativeai as genai
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 
 def get_latest_gooaye_episode():
     rss_url = "https://open.firstory.me/rss/user/ckinqg0o0f9y30855nzzg4c3v" 
     feed = feedparser.parse(rss_url)
-    
     if not feed.entries:
         return None, None
-        
     latest = feed.entries[0]
     title = latest.title
-    
     for link in latest.links:
         if link.type == 'audio/mpeg':
             return link.href, title
@@ -35,7 +33,13 @@ def download_and_transcribe(mp3_url):
     model = whisper.load_model("base")
     result = model.transcribe(audio_file)
     os.remove(audio_file)
-    return result["text"]
+    
+    # 將逐字稿存成 txt 檔案
+    transcript_text = result["text"]
+    with open("transcript.txt", "w", encoding="utf-8") as f:
+        f.write(transcript_text)
+        
+    return transcript_text
 
 def analyze_with_gemini(transcript, title):
     print("🤖 呼叫 Gemini 進行產業分析...")
@@ -56,24 +60,32 @@ def analyze_with_gemini(transcript, title):
     response = model.generate_content(prompt)
     return response.text
 
-def send_email(subject, content):
-    print("📧 準備寄送電子報...")
+def send_email(subject, content, transcript_file_path):
+    print("📧 準備寄送電子報與逐字稿附件...")
     gmail_user = os.environ.get("GMAIL_USER")
     gmail_password = os.environ.get("GMAIL_PASSWORD")
     
     msg = MIMEMultipart()
     msg['From'] = gmail_user
     msg['To'] = gmail_user
-    msg['Subject'] = f"【股癌 AI 助理】{subject} - 重點分析"
+    msg['Subject'] = f"【股癌 AI 助理】{subject} - 分析報告與逐字稿"
     
+    # 郵件正文 (AI 分析結果)
     msg.attach(MIMEText(content, 'plain', 'utf-8'))
+    
+    # 添加附件 (完整逐字稿)
+    if os.path.exists(transcript_file_path):
+        with open(transcript_file_path, "rb") as f:
+            part = MIMEApplication(f.read(), Name=os.path.basename(transcript_file_path))
+        part['Content-Disposition'] = f'attachment; filename="{os.path.basename(transcript_file_path)}"'
+        msg.attach(part)
     
     try:
         server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
         server.login(gmail_user, gmail_password)
         server.send_message(msg)
         server.quit()
-        print("✅ 電子報寄送成功！請檢查信箱。")
+        print("✅ 電子報與逐字稿寄送成功！")
     except Exception as e:
         print(f"❌ 寄信失敗：{e}")
 
@@ -83,4 +95,5 @@ if __name__ == "__main__":
         print(f"📌 處理集數：{episode_title}")
         transcript = download_and_transcribe(mp3_link)
         analysis_result = analyze_with_gemini(transcript, episode_title)
-        send_email(episode_title, analysis_result)
+        # 傳入生成的逐字稿路徑
+        send_email(episode_title, analysis_result, "transcript.txt")
